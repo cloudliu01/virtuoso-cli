@@ -31,13 +31,18 @@ class SkillExecResponse(FrozenModel):
 SKILL_EXEC_ADAPTER: Final = TypeAdapter(SkillExecResponse)
 
 
-def _run_vcli(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
+def _run_vcli(
+    env: dict[str, str],
+    *args: str,
+    stdin: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - executes this checkout's Python module
         [sys.executable, "-m", "virtuoso_cli", *args],
         cwd=PROJECT_ROOT,
         env=env,
         check=False,
         capture_output=True,
+        input=stdin,
         text=True,
     )
 
@@ -103,3 +108,87 @@ def test_skill_exec_uses_auto_selected_session_and_returns_json(tmp_path: Path) 
     assert payload.errors == ()
     assert payload.warnings == ()
     assert payload.execution_time is not None
+
+
+def test_skill_eval_wraps_inline_code_in_progn(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["XDG_CACHE_HOME"] = str(tmp_path / "cache")
+    env["PYTHONPATH"] = str(PROJECT_ROOT / "src")
+    port, requests, thread = _start_fake_daemon(STX + b"3")
+    _write_session(env, session_id="cloud-host-cloud_no_ex_network-46859", port=port)
+
+    result = _run_vcli(env, "--format", "json", "skill", "eval", "plus(1 2)")
+
+    thread.join(timeout=1)
+    assert not thread.is_alive(), "fake daemon did not receive the CLI request"
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert json.loads(requests.get_nowait()) == {
+        "skill": "progn(\nplus(1 2)\n)",
+        "timeout": 30,
+    }
+    payload = SKILL_EXEC_ADAPTER.validate_json(result.stdout)
+    assert payload.status == "success"
+    assert payload.output == "3"
+
+
+def test_skill_eval_reads_stdin_when_requested(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["XDG_CACHE_HOME"] = str(tmp_path / "cache")
+    env["PYTHONPATH"] = str(PROJECT_ROOT / "src")
+    port, requests, thread = _start_fake_daemon(STX + b"4")
+    _write_session(env, session_id="cloud-host-cloud_no_ex_network-46859", port=port)
+
+    result = _run_vcli(
+        env,
+        "--format",
+        "json",
+        "skill",
+        "eval",
+        "--stdin",
+        stdin="plus(2 2)",
+    )
+
+    thread.join(timeout=1)
+    assert not thread.is_alive(), "fake daemon did not receive the CLI request"
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert json.loads(requests.get_nowait()) == {
+        "skill": "progn(\nplus(2 2)\n)",
+        "timeout": 30,
+    }
+    payload = SKILL_EXEC_ADAPTER.validate_json(result.stdout)
+    assert payload.status == "success"
+    assert payload.output == "4"
+
+
+def test_skill_load_sends_escaped_load_expression(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["XDG_CACHE_HOME"] = str(tmp_path / "cache")
+    env["PYTHONPATH"] = str(PROJECT_ROOT / "src")
+    env["VB_CLIENT_ID"] = "pytest-load"
+    skill_file = tmp_path / 'quoted"name.il'
+    skill_file.write_text("procedure(test() t)\n", encoding="utf-8")
+    scratch_file = Path("/tmp/virtuoso_bridge/pytest-load") / skill_file.name  # noqa: S108
+    scratch_file.unlink(missing_ok=True)
+    port, requests, thread = _start_fake_daemon(STX + b"t")
+    _write_session(env, session_id="cloud-host-cloud_no_ex_network-46859", port=port)
+
+    result = _run_vcli(env, "--format", "json", "skill", "load", str(skill_file))
+
+    thread.join(timeout=1)
+    assert not thread.is_alive(), "fake daemon did not receive the CLI request"
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert json.loads(requests.get_nowait()) == {
+        "skill": f'(load "{str(scratch_file).replace(chr(34), chr(92) + chr(34))}")',
+        "timeout": 30,
+    }
+    assert scratch_file.stat().st_mode & 0o004
+    scratch_file.unlink(missing_ok=True)
+    payload = SKILL_EXEC_ADAPTER.validate_json(result.stdout)
+    assert payload.status == "success"
+    assert payload.output == "t"

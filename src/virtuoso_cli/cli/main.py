@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import socket
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from virtuoso_cli import __version__
 from virtuoso_cli.bridge.client import VirtuosoClient
+from virtuoso_cli.bridge.escaping import escape_skill_string
 from virtuoso_cli.domain.errors import ErrorKind, VirtuosoError
 from virtuoso_cli.storage.sessions import SessionInfo
 
@@ -17,6 +21,7 @@ if TYPE_CHECKING:
 
 _JSON_FORMAT: Final = "json"
 _DEFAULT_TIMEOUT_SECONDS: Final = 30
+_REMOTE_SCRATCH_ROOT: Final = Path("/tmp/virtuoso_bridge")  # noqa: S108
 
 
 def main() -> None:
@@ -62,19 +67,25 @@ def _parse_globals(argv: tuple[str, ...]) -> tuple[tuple[str, ...], str]:
 def _dispatch(argv: tuple[str, ...], output_format: str) -> dict[str, JsonValue] | None:
     if output_format == "__version_printed__":
         return None
+    payload: dict[str, JsonValue]
     match argv:
         case ("session", "list"):
-            return _session_list()
+            payload = _session_list()
         case ("session", "current"):
-            return _session_current()
+            payload = _session_current()
         case ("session", "show", session_id):
-            return _session_show(session_id)
+            payload = _session_show(session_id)
         case ("skill", "exec", code, *args):
-            return _skill_exec(code, tuple(args))
+            payload = _skill_exec(code, tuple(args))
+        case ("skill", "eval", *args):
+            payload = _skill_eval(tuple(args))
+        case ("skill", "load", file):
+            payload = _skill_load(file)
         case ():
             raise VirtuosoError(ErrorKind.CONFIG, "missing command")
         case _:
             raise VirtuosoError(ErrorKind.CONFIG, f"unsupported command: {' '.join(argv)}")
+    return payload
 
 
 JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
@@ -162,6 +173,51 @@ def _skill_exec(code: str, args: tuple[str, ...]) -> dict[str, JsonValue]:
     return _skill_result_payload(result)
 
 
+def _skill_eval(args: tuple[str, ...]) -> dict[str, JsonValue]:
+    skill = _read_eval_input(args)
+    wrapped = f"progn(\n{skill}\n)"
+    client = _client_from_env(_DEFAULT_TIMEOUT_SECONDS)
+    result = client.execute_skill(wrapped, timeout=_DEFAULT_TIMEOUT_SECONDS)
+    return _skill_result_payload(result)
+
+
+def _skill_load(file: str) -> dict[str, JsonValue]:
+    source = Path(file)
+    if not source.exists():
+        raise VirtuosoError(ErrorKind.NOT_FOUND, f"file not found: {file}")
+
+    scratch_dir = _REMOTE_SCRATCH_ROOT / _resolve_client_id()
+    try:
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        scratch_dir.chmod(0o755)
+        remote_path = scratch_dir / source.name
+        shutil.copy2(source, remote_path)
+        remote_path.chmod(0o644)
+    except OSError as exc:
+        raise VirtuosoError(ErrorKind.IO, str(exc)) from exc
+
+    escaped_path = escape_skill_string(str(remote_path))
+    client = _client_from_env(_DEFAULT_TIMEOUT_SECONDS)
+    result = client.execute_skill(f'(load "{escaped_path}")', timeout=_DEFAULT_TIMEOUT_SECONDS)
+    return _skill_result_payload(result)
+
+
+def _read_eval_input(args: tuple[str, ...]) -> str:
+    match args:
+        case ("--stdin",):
+            skill = sys.stdin.read()
+        case (code,):
+            skill = code
+        case ():
+            raise VirtuosoError(ErrorKind.CONFIG, "no SKILL expression provided")
+        case _:
+            raise VirtuosoError(ErrorKind.CONFIG, "pass SKILL via argument OR --stdin, not both")
+
+    if not skill.strip():
+        raise VirtuosoError(ErrorKind.CONFIG, "empty SKILL expression")
+    return skill
+
+
 def _parse_timeout(args: tuple[str, ...]) -> int:
     timeout = _DEFAULT_TIMEOUT_SECONDS
     index = 0
@@ -227,6 +283,27 @@ def _skill_result_payload(result: VirtuosoResult) -> dict[str, JsonValue]:
         "warnings": list(result.warnings),
         "execution_time": result.execution_time,
     }
+
+
+def _resolve_client_id() -> str:
+    for raw_value in (
+        os.environ.get("VB_CLIENT_ID"),
+        os.environ.get("VB_PROFILE"),
+        socket.gethostname(),
+    ):
+        if raw_value:
+            client_id = _sanitize_client_id(raw_value)
+            if client_id:
+                return client_id
+    return "default"
+
+
+def _sanitize_client_id(value: str) -> str:
+    chars = [
+        char if char.isascii() and (char.isalnum() or char in "._-") else "_" for char in value
+    ]
+    sanitized = "".join(chars).strip("_")
+    return sanitized[:64]
 
 
 def _print_error(error: VirtuosoError) -> None:
