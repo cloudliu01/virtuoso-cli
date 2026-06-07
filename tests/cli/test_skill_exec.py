@@ -42,8 +42,16 @@ class SkillBroadcastResponse(FrozenModel):
     results: tuple[BroadcastResult, ...]
 
 
+class SkillInfoResponse(FrozenModel):
+    func_name: str
+    found: bool
+    raw: str | None = None
+    error: str | None = None
+
+
 SKILL_EXEC_ADAPTER: Final = TypeAdapter(SkillExecResponse)
 SKILL_BROADCAST_ADAPTER: Final = TypeAdapter(SkillBroadcastResponse)
+SKILL_INFO_ADAPTER: Final = TypeAdapter(SkillInfoResponse)
 
 
 def _run_vcli(
@@ -247,4 +255,54 @@ def test_skill_broadcast_runs_code_for_each_live_session(tmp_path: Path) -> None
             BroadcastResult(session="a-session", ok=True, output="10"),
             BroadcastResult(session="b-session", ok=True, output="20"),
         ),
+    )
+
+
+def test_skill_info_queries_more_info_and_returns_raw_payload(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["XDG_CACHE_HOME"] = str(tmp_path / "cache")
+    env["PYTHONPATH"] = str(PROJECT_ROOT / "src")
+    port, requests, thread = _start_fake_daemon(STX + b'"<html>doc</html>"')
+    _write_session(env, session_id="cloud-host-cloud_no_ex_network-46859", port=port)
+
+    result = _run_vcli(env, "--format", "json", "skill", "info", 'printf"bad')
+
+    thread.join(timeout=1)
+    assert not thread.is_alive(), "fake daemon did not receive the CLI request"
+    assert result.returncode == 0
+    assert result.stderr == ""
+    request = json.loads(requests.get_nowait())
+    assert request["timeout"] == 30
+    assert (
+        'mfGetMoreInfo("$象牙/doc/api_more_info/api_more_info.html" "printf\\"bad")'
+        in request["skill"]
+    )
+    payload = SKILL_INFO_ADAPTER.validate_json(result.stdout)
+    assert payload == SkillInfoResponse(
+        func_name='printf"bad',
+        found=True,
+        raw='"<html>doc</html>"',
+    )
+
+
+def test_skill_info_reports_not_found_for_nil_skill_result(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["XDG_CACHE_HOME"] = str(tmp_path / "cache")
+    env["PYTHONPATH"] = str(PROJECT_ROOT / "src")
+    port, _requests, thread = _start_fake_daemon(STX + b"nil")
+    _write_session(env, session_id="cloud-host-cloud_no_ex_network-46859", port=port)
+
+    result = _run_vcli(env, "--format", "json", "skill", "info", "missingFunc")
+
+    thread.join(timeout=1)
+    assert not thread.is_alive(), "fake daemon did not receive the CLI request"
+    assert result.returncode == 0
+    assert result.stderr == ""
+    payload = SKILL_INFO_ADAPTER.validate_json(result.stdout)
+    assert payload == SkillInfoResponse(
+        func_name="missingFunc",
+        found=False,
+        error="function not found or More Info not available",
     )

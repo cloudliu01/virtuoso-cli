@@ -152,6 +152,22 @@ Differential tests compare:
 Only timestamps, elapsed durations, UUIDs, PIDs, and temporary absolute paths
 may be normalized.
 
+## TODOs
+
+- [x] Port Python `skill exec`, `skill eval`, `skill load`, and `skill broadcast`.
+- [x] Port Python `skill info`.
+- [ ] Port Python local `skill find`.
+- [ ] Port Python `skill cache` and `skill sync` compatibility surfaces.
+- [ ] Port Python `cell` command group.
+- [ ] Port Python `schematic` command group.
+- [ ] Port Python `maestro` command group.
+- [ ] Port Python `window` command group.
+- [ ] Port Python Ocean-backed synchronous `sim` commands.
+- [ ] Port Python `profile`, `schema`, `tx`, `rpc`, and `mcp` surfaces.
+- [ ] Port Python SSH/tunnel, remote deployment, Spectre jobs, and PSF parsing.
+- [ ] Rebuild `vtui` with Textual.
+- [ ] Run live Virtuoso compatibility wave and final release gate.
+
 ## Tasks
 
 ### 1. Select And Establish The Frozen Rust Oracle

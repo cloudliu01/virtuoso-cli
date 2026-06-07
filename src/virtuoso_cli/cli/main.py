@@ -75,14 +75,8 @@ def _dispatch(argv: tuple[str, ...], output_format: str) -> dict[str, JsonValue]
             payload = _session_current()
         case ("session", "show", session_id):
             payload = _session_show(session_id)
-        case ("skill", "exec", code, *args):
-            payload = _skill_exec(code, tuple(args))
-        case ("skill", "eval", *args):
-            payload = _skill_eval(tuple(args))
-        case ("skill", "load", file):
-            payload = _skill_load(file)
-        case ("skill", "broadcast", code, *args):
-            payload = _skill_broadcast(code, tuple(args))
+        case ("skill", *skill_args):
+            payload = _dispatch_skill(tuple(skill_args))
         case ():
             raise VirtuosoError(ErrorKind.CONFIG, "missing command")
         case _:
@@ -91,6 +85,24 @@ def _dispatch(argv: tuple[str, ...], output_format: str) -> dict[str, JsonValue]
 
 
 JsonValue = str | int | float | bool | None | dict[str, "JsonValue"] | list["JsonValue"]
+
+
+def _dispatch_skill(argv: tuple[str, ...]) -> dict[str, JsonValue]:
+    match argv:
+        case ("exec", code, *args):
+            return _skill_exec(code, tuple(args))
+        case ("eval", *args):
+            return _skill_eval(tuple(args))
+        case ("load", file):
+            return _skill_load(file)
+        case ("broadcast", code, *args):
+            return _skill_broadcast(code, tuple(args))
+        case ("info", func_name):
+            return _skill_info(func_name)
+        case ():
+            raise VirtuosoError(ErrorKind.CONFIG, "missing skill command")
+        case _:
+            raise VirtuosoError(ErrorKind.CONFIG, f"unsupported skill command: {' '.join(argv)}")
 
 
 def _session_list() -> dict[str, JsonValue]:
@@ -241,6 +253,36 @@ def _broadcast_status(*, ok_count: int, session_count: int) -> str:
     if ok_count == session_count:
         return "success"
     return "partial"
+
+
+def _skill_info(func_name: str) -> dict[str, JsonValue]:
+    if not func_name:
+        raise VirtuosoError(ErrorKind.CONFIG, "function name is required")
+
+    escaped_name = escape_skill_string(func_name)
+    skill_code = (
+        "let((result)\n"
+        "  when(boundp('mfGetMoreInfo\n"
+        '    result = mfGetMoreInfo("$象牙/doc/api_more_info/api_more_info.html" '
+        f'"{escaped_name}")\n'
+        "    if(result then result else nil)\n"
+        "  )\n"
+        ")"
+    )
+    client = _client_from_env(_DEFAULT_TIMEOUT_SECONDS)
+    result = client.execute_skill(skill_code, timeout=_DEFAULT_TIMEOUT_SECONDS)
+    if not result.skill_ok():
+        return {
+            "func_name": func_name,
+            "found": False,
+            "error": "function not found or More Info not available",
+        }
+
+    output = result.output.strip()
+    if output in {"nil", ""}:
+        return {"func_name": func_name, "found": False}
+
+    return {"func_name": func_name, "found": True, "raw": output}
 
 
 def _read_eval_input(args: tuple[str, ...]) -> str:
