@@ -22,3 +22,16 @@ test_tb.ahdlSimDB/
 test_tb.log
 
 /0
+
+# Python migration artifacts
+__pycache__/
+*.py[cod]
+.migration/
+.pytest_cache/
+.ruff_cache/
+.basedpyright/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/

@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "active_work_id": "python-rewrite-v040",
+  "works": {
+    "python-rewrite-v040": {
+      "work_id": "python-rewrite-v040",
+      "active_plan": ".omo/plans/python-rewrite.md",
+      "plan_name": "python-rewrite",
+      "session_ids": [
+        "codex:current"
+      ],
+      "status": "active",
+      "worktree_path": null
+    }
+  }
+}

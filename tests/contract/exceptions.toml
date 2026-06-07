@@ -1,0 +1,10 @@
+# Intentional corrections where the Python implementation may differ from the
+# frozen v0.4.0-alpha.9 Rust oracle.
+
+[[exception]]
+id = "remote-daemon-selection"
+reason = "Deploy the callback-file Python daemon rather than the obsolete stdin-framed daemon."
+
+[[exception]]
+id = "daemon-path-override"
+reason = "Honor the configured daemon path instead of forcing ~/.cargo/bin/virtuoso-daemon."

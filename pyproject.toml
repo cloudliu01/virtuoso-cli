@@ -1,0 +1,123 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "virtuoso-cli"
+version = "0.4.0a9"
+description = "CLI tool to control Cadence Virtuoso from anywhere"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "virtuoso-cli contributors" }]
+keywords = ["eda", "cadence", "virtuoso", "analog-ic", "spectre"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+dependencies = [
+    "platformdirs>=4.2,<5",
+    "pydantic>=2.7,<3",
+    "python-dotenv>=1.0,<2",
+    "rich>=13.7,<15",
+    "textual>=1.0,<2",
+]
+
+[project.urls]
+Homepage = "https://github.com/deanyou/virtuoso-cli"
+Repository = "https://github.com/deanyou/virtuoso-cli"
+
+[project.scripts]
+vcli = "virtuoso_cli.cli.main:main"
+vtui = "virtuoso_cli.tui.app:main"
+virtuoso-daemon = "virtuoso_cli.daemon.main:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["virtuoso_cli*"]
+
+[tool.basedpyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.10"
+pythonPlatform = "Linux"
+venvPath = "/projects/miniforge/envs"
+venv = "venv312"
+include = ["src/virtuoso_cli", "tests"]
+exclude = [
+    "**/__pycache__",
+    "**/.venv",
+    "**/build",
+    "**/dist",
+]
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnusedVariable = "error"
+reportMissingParameterType = "error"
+reportMissingTypeArgument = "error"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src/virtuoso_cli", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",
+    "ISC001",
+    "D203",
+    "D213",
+    "CPY001",
+    "FBT001",
+    "FBT002",
+    "TD002",
+    "TD003",
+    "FIX002",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "ARG",
+    "D",
+    "PLR2004",
+    "S101",
+    "SLF001",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["virtuoso_cli"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

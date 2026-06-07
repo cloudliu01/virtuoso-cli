@@ -86,6 +86,11 @@ Sessions are stored as JSON in `~/.cache/virtuoso_bridge/sessions/<id>.json`.
 `SessionInfo::list()` returns all files; `list_alive()` filters to ports that are currently bound.
 Test helpers must bind a real `TcpListener` for sessions that should survive concurrent `cleanup()` calls.
 
+## Live Virtuoso Testing
+
+When a task requires starting a live Virtuoso session, always start it as Unix user
+`cloud_no_ex_network`. No exceptions. Do not start Virtuoso under any other user.
+
 ## Environment Variables
 
 All configuration via env vars — see `src/config.rs` `Config::from_env()`.
