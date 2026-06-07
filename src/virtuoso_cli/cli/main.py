@@ -81,6 +81,8 @@ def _dispatch(argv: tuple[str, ...], output_format: str) -> dict[str, JsonValue]
             payload = _skill_eval(tuple(args))
         case ("skill", "load", file):
             payload = _skill_load(file)
+        case ("skill", "broadcast", code, *args):
+            payload = _skill_broadcast(code, tuple(args))
         case ():
             raise VirtuosoError(ErrorKind.CONFIG, "missing command")
         case _:
@@ -200,6 +202,45 @@ def _skill_load(file: str) -> dict[str, JsonValue]:
     client = _client_from_env(_DEFAULT_TIMEOUT_SECONDS)
     result = client.execute_skill(f'(load "{escaped_path}")', timeout=_DEFAULT_TIMEOUT_SECONDS)
     return _skill_result_payload(result)
+
+
+def _skill_broadcast(code: str, args: tuple[str, ...]) -> dict[str, JsonValue]:
+    timeout = _parse_timeout(args)
+    sessions = SessionInfo.list_alive()
+    if not sessions:
+        raise VirtuosoError(ErrorKind.NOT_FOUND, "no live sessions found")
+
+    results: list[JsonValue] = []
+    ok_count = 0
+    for session in sessions:
+        client = VirtuosoClient("127.0.0.1", session.port, timeout=timeout)
+        try:
+            result = client.execute_skill(code, timeout=timeout)
+        except VirtuosoError as exc:
+            results.append({"session": session.id, "ok": False, "error": str(exc)})
+            continue
+
+        ok = result.skill_ok()
+        if ok:
+            ok_count += 1
+        results.append({"session": session.id, "ok": ok, "output": result.output})
+
+    if ok_count == 0:
+        raise VirtuosoError(ErrorKind.EXECUTION, f"broadcast failed on all {len(results)} sessions")
+
+    status = _broadcast_status(ok_count=ok_count, session_count=len(results))
+    return {
+        "status": status,
+        "sessions": len(results),
+        "ok": ok_count,
+        "results": results,
+    }
+
+
+def _broadcast_status(*, ok_count: int, session_count: int) -> str:
+    if ok_count == session_count:
+        return "success"
+    return "partial"
 
 
 def _read_eval_input(args: tuple[str, ...]) -> str:

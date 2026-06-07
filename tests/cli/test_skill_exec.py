@@ -28,7 +28,22 @@ class SkillExecResponse(FrozenModel):
     execution_time: float | None
 
 
+class BroadcastResult(FrozenModel):
+    session: str
+    ok: bool
+    output: str | None = None
+    error: str | None = None
+
+
+class SkillBroadcastResponse(FrozenModel):
+    status: str
+    sessions: int
+    ok: int
+    results: tuple[BroadcastResult, ...]
+
+
 SKILL_EXEC_ADAPTER: Final = TypeAdapter(SkillExecResponse)
+SKILL_BROADCAST_ADAPTER: Final = TypeAdapter(SkillBroadcastResponse)
 
 
 def _run_vcli(
@@ -192,3 +207,44 @@ def test_skill_load_sends_escaped_load_expression(tmp_path: Path) -> None:
     payload = SKILL_EXEC_ADAPTER.validate_json(result.stdout)
     assert payload.status == "success"
     assert payload.output == "t"
+
+
+def test_skill_broadcast_runs_code_for_each_live_session(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["XDG_CACHE_HOME"] = str(tmp_path / "cache")
+    env["PYTHONPATH"] = str(PROJECT_ROOT / "src")
+    first_port, first_requests, first_thread = _start_fake_daemon(STX + b"10")
+    second_port, second_requests, second_thread = _start_fake_daemon(STX + b"20")
+    _write_session(env, session_id="a-session", port=first_port)
+    _write_session(env, session_id="b-session", port=second_port)
+
+    result = _run_vcli(
+        env,
+        "--format",
+        "json",
+        "skill",
+        "broadcast",
+        "plus(9 1)",
+        "--timeout",
+        "5",
+    )
+
+    first_thread.join(timeout=1)
+    second_thread.join(timeout=1)
+    assert not first_thread.is_alive(), "first fake daemon did not receive the CLI request"
+    assert not second_thread.is_alive(), "second fake daemon did not receive the CLI request"
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert json.loads(first_requests.get_nowait()) == {"skill": "plus(9 1)", "timeout": 5}
+    assert json.loads(second_requests.get_nowait()) == {"skill": "plus(9 1)", "timeout": 5}
+    payload = SKILL_BROADCAST_ADAPTER.validate_json(result.stdout)
+    assert payload == SkillBroadcastResponse(
+        status="success",
+        sessions=2,
+        ok=2,
+        results=(
+            BroadcastResult(session="a-session", ok=True, output="10"),
+            BroadcastResult(session="b-session", ok=True, output="20"),
+        ),
+    )
